@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Code Analyzer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+
+    <!-- UPLOAD SCREEN -->
+    <section id="uploadScreen">
+      <div class="header">
+        <div class="logo">⬡</div>
+        <h1>Code Analyzer</h1>
+        <p>Upload your website files. Get bugs, security issues,<br>performance problems and improvements instantly.</p>
+      </div>
+
+      <div class="upload-card">
+        <input type="file" id="fileInput" accept=".zip,.php,.html,.htm,.css,.js,.json,.sql,.txt">
+        <label for="fileInput" class="drop-zone" id="dropZone">
+          <div class="drop-icon">↑</div>
+          <div class="drop-label" id="dropLabel">Drop files here or tap to browse</div>
+          <div class="drop-hint">ZIP · PHP · HTML · CSS · JS · JSON · SQL — Max 10MB</div>
+        </label>
+
+        <div class="file-types">
+          <span>PHP</span><span>HTML</span><span>CSS</span>
+          <span>JS</span><span>ZIP</span><span>JSON</span>
+        </div>
+
+        <button id="analyzeBtn" class="btn-analyze" disabled>
+          <span>Analyze Code</span>
+          <span class="btn-arrow">→</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- LOADING SCREEN -->
+    <section id="loadingScreen" style="display:none">
+      <div class="loading-inner">
+        <div class="pulse-ring"></div>
+        <div class="loading-icon">⬡</div>
+        <h2 id="loadingMsg">Running static analysis...</h2>
+        <p class="loading-sub">This may take 20–60 seconds</p>
+        <div class="progress-steps">
+          <div class="step active" id="step1">PHPStan</div>
+          <div class="step" id="step2">ESLint</div>
+          <div class="step" id="step3">HTMLHint</div>
+          <div class="step" id="step4">Stylelint</div>
+          <div class="step" id="step5">AI Review</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RESULTS SCREEN -->
+    <section id="resultsScreen" style="display:none">
+      <div class="results-header">
+        <button class="back-btn" id="backBtn">← New Analysis</button>
+        <div class="results-meta" id="resultsMeta"></div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="static">🔧 Static Analysis</button>
+        <button class="tab" data-tab="ai">🤖 AI Analysis</button>
+      </div>
+
+      <div class="tab-pane active" id="staticPane">
+        <div id="staticContent"></div>
+      </div>
+
+      <div class="tab-pane" id="aiPane">
+        <div id="aiContent"></div>
+      </div>
+    </section>
+
+    <!-- ERROR SCREEN -->
+    <section id="errorScreen" style="display:none">
+      <div class="error-card">
+        <div class="error-icon">✕</div>
+        <h3>Analysis Failed</h3>
+        <p id="errorMsg"></p>
+        <button class="btn-analyze" id="retryBtn">Try Again</button>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const screens = ['uploadScreen','loadingScreen','resultsScreen','errorScreen'];
+
+    function show(id) {
+      screens.forEach(s => $(s).style.display = s === id ? 'block' : 'none');
+    }
+
+    // File input
+    $('fileInput').addEventListener('change', function() {
+      if (this.files[0]) {
+        $('dropLabel').textContent = this.files[0].name;
+        $('dropZone').classList.add('has-file');
+        $('analyzeBtn').disabled = false;
+      }
+    });
+
+    // Loading step animation
+    const steps = ['step1','step2','step3','step4','step5'];
+    let stepIndex = 0, stepInterval;
+
+    function startSteps() {
+      stepIndex = 0;
+      steps.forEach(s => $(s).classList.remove('active','done'));
+      $(steps[0]).classList.add('active');
+      stepInterval = setInterval(() => {
+        $(steps[stepIndex]).classList.remove('active');
+        $(steps[stepIndex]).classList.add('done');
+        stepIndex++;
+        if (stepIndex < steps.length) {
+          $(steps[stepIndex]).classList.add('active');
+        } else {
+          clearInterval(stepInterval);
+        }
+      }, 8000);
+    }
+
+    // Analyze
+    $('analyzeBtn').addEventListener('click', async () => {
+      const file = $('fileInput').files[0];
+      if (!file) return;
+
+      show('loadingScreen');
+      startSteps();
+
+      const formData = new FormData();
+      formData.append('codefile', file);
+
+      try {
+        const res = await fetch('/analyze', { method: 'POST', body: formData });
+        const data = await res.json();
+        clearInterval(stepInterval);
+
+        if (!data.success) throw new Error(data.error || 'Unknown error');
+        renderResults(data);
+        show('resultsScreen');
+      } catch (err) {
+        clearInterval(stepInterval);
+        $('errorMsg').textContent = err.message;
+        show('errorScreen');
+      }
+    });
+
+    // Render results
+    function renderResults(data) {
+      $('resultsMeta').innerHTML =
+        `<span>📄 ${data.fileCount} file(s)</span><span>🔧 ${data.staticIssues.length} static issues</span>`;
+
+      // Static tab
+      if (data.staticIssues.length === 0) {
+        $('staticContent').innerHTML = '<div class="all-clear">✅ No issues found by static analysis tools.</div>';
+      } else {
+        const grouped = {};
+        data.staticIssues.forEach(i => {
+          if (!grouped[i.file]) grouped[i.file] = [];
+          grouped[i.file].push(i);
+        });
+        let html = '';
+        for (const [file, issues] of Object.entries(grouped)) {
+          html += `<div class="file-block"><div class="file-name">📄 ${file}</div>`;
+          issues.forEach(i => {
+            const cls = i.type.toLowerCase().includes('error') ? 'err' :
+                        i.type.toLowerCase().includes('warning') ? 'warn' : 'info';
+            html += `<div class="s-issue ${cls}">
+              <div class="s-issue-top">
+                <span class="badge">${i.type}</span>
+                <span class="line-no">Line ${i.line || '?'}</span>
+              </div>
+              <p>${i.message}</p>
+              ${i.rule ? `<small>Rule: ${i.rule}</small>` : ''}
+            </div>`;
+          });
+          html += `</div>`;
+        }
+        $('staticContent').innerHTML = html;
+      }
+
+      // AI tab
+      $('aiContent').innerHTML = data.aiAnalysis;
+    }
+
+    // Tabs
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        $(`${tab.dataset.tab}Pane`).classList.add('active');
+      });
+    });
+
+    // Back / Retry
+    $('backBtn').addEventListener('click', () => { reset(); show('uploadScreen'); });
+    $('retryBtn').addEventListener('click', () => { reset(); show('uploadScreen'); });
+
+    function reset() {
+      $('fileInput').value = '';
+      $('dropLabel').textContent = 'Drop files here or tap to browse';
+      $('dropZone').classList.remove('has-file');
+      $('analyzeBtn').disabled = true;
+    }
+  </script>
+</body>
+</html>
